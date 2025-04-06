@@ -1,15 +1,16 @@
-
 import React, { useState, useEffect } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle, Upload, Loader2, PlusCircle, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import { detectPriority, getDetectedKeywords } from "@/utils/keywordDetection";
+import { ref, push, serverTimestamp } from "firebase/database";
+import { rtdb } from "@/config/firebase";
 
 const SubmitGrievance: React.FC = () => {
   const [title, setTitle] = useState("");
@@ -20,6 +21,7 @@ const SubmitGrievance: React.FC = () => {
   const [detectedKeywords, setDetectedKeywords] = useState<string[]>([]);
   const [priority, setPriority] = useState<"normal" | "high" | "urgent">("normal");
   const [creditsRequested, setCreditsRequested] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
   
   const { user, isAuthenticated, isLoading, updateUserCredits } = useAuth();
   const { toast } = useToast();
@@ -40,6 +42,18 @@ const SubmitGrievance: React.FC = () => {
     if (!selectedFiles) return;
     
     const newFiles = Array.from(selectedFiles);
+    
+    // Validate file size (limit to 5MB)
+    const invalidFiles = newFiles.filter(file => file.size > 5 * 1024 * 1024);
+    if (invalidFiles.length > 0) {
+      toast({
+        title: "File Size Limit Exceeded",
+        description: "One or more files exceed the 5MB size limit.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setFiles(prev => [...prev, ...newFiles]);
     
     // Create preview URLs for images
@@ -60,6 +74,36 @@ const SubmitGrievance: React.FC = () => {
   const removeFile = (index: number) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
     setFilePreviewUrls(prev => prev.filter((_, i) => i !== index));
+  };
+  
+  const uploadToCloudinary = async (file: File): Promise<string> => {
+    // Create form data for Cloudinary upload
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', 'grievance_uploads'); // You'll need to create this preset in Cloudinary dashboard
+    
+    try {
+      setUploadingFile(true);
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/dkf25yvzj/auto/upload`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error('Failed to upload file');
+      }
+      
+      const data = await response.json();
+      return data.secure_url;
+    } catch (error) {
+      console.error('Error uploading to Cloudinary:', error);
+      throw error;
+    } finally {
+      setUploadingFile(false);
+    }
   };
   
   const handleSubmit = async (e: React.FormEvent) => {
@@ -84,22 +128,56 @@ const SubmitGrievance: React.FC = () => {
       return;
     }
     
+    if (!title.trim() || !description.trim()) {
+      toast({
+        title: "Missing Information",
+        description: "Please provide both a title and description for your grievance.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsSubmitting(true);
     
     try {
-      // In a real app, you would submit the form data to an API
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
+      // Upload all files to Cloudinary and collect their URLs
+      const attachmentUrls: string[] = [];
+      
+      if (files.length > 0) {
+        for (let i = 0; i < files.length; i++) {
+          const fileUrl = await uploadToCloudinary(files[i]);
+          attachmentUrls.push(fileUrl);
+        }
+      }
+      
+      // Create new grievance in Firebase Realtime Database
+      const grievancesRef = ref(rtdb, 'grievances');
+      const newGrievanceRef = push(grievancesRef);
+      
+      const grievanceData = {
+        userId: user.id,
+        title,
+        description,
+        date: new Date().toISOString(),
+        status: "pending",
+        priority,
+        attachments: attachmentUrls.length > 0 ? attachmentUrls : null,
+        createdAt: serverTimestamp(),
+      };
+      
+      await push(grievancesRef, grievanceData);
       
       // Update the user's credits
       updateUserCredits(user.grievanceCredits - 1);
       
       toast({
         title: "Grievance Submitted Successfully",
-        description: `Your grievance has been submitted with ID: GR${Math.floor(Math.random() * 100000)}`,
+        description: "Your grievance has been submitted and will be reviewed soon.",
       });
       
       navigate("/dashboard");
     } catch (error) {
+      console.error("Error submitting grievance:", error);
       toast({
         title: "Submission Failed",
         description: "Failed to submit your grievance. Please try again.",
@@ -114,8 +192,15 @@ const SubmitGrievance: React.FC = () => {
     if (!user || creditsRequested) return;
     
     try {
-      // In a real app, you would make an API call to request more credits
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API delay
+      // Push a credit request to Firebase
+      const creditRequestsRef = ref(rtdb, 'creditRequests');
+      await push(creditRequestsRef, {
+        userId: user.id,
+        userName: user.name,
+        currentCredits: user.grievanceCredits,
+        requestDate: new Date().toISOString(),
+        status: "pending"
+      });
       
       setCreditsRequested(true);
       
@@ -177,16 +262,16 @@ const SubmitGrievance: React.FC = () => {
           {/* Priority Warning */}
           {priority !== "normal" && detectedKeywords.length > 0 && (
             <div className="mb-6">
-              <Card className={`border-${priority === "urgent" ? "red" : "orange"}-200 bg-${priority === "urgent" ? "red" : "orange"}-50`}>
+              <Card className="border-amber-200 bg-amber-50">
                 <CardContent className="p-4 flex items-start space-x-4">
                   <div className="pt-1">
-                    <AlertCircle className={`w-5 h-5 text-${priority === "urgent" ? "red" : "orange"}-500`} />
+                    <AlertCircle className="w-5 h-5 text-amber-500" />
                   </div>
                   <div>
-                    <h3 className={`font-medium text-${priority === "urgent" ? "red" : "orange"}-800`}>
+                    <h3 className="font-medium text-amber-800">
                       {priority === "urgent" ? "Urgent Priority Detected" : "High Priority Detected"}
                     </h3>
-                    <p className={`text-sm text-${priority === "urgent" ? "red" : "orange"}-600`}>
+                    <p className="text-sm text-amber-600">
                       Your grievance contains keywords that indicate it may be {priority === "urgent" ? "urgent" : "high priority"}.
                       {detectedKeywords.length > 0 && ` Detected terms: ${detectedKeywords.join(", ")}.`}
                     </p>
@@ -243,6 +328,17 @@ const SubmitGrievance: React.FC = () => {
                   accept="image/*,.pdf,.doc,.docx"
                   className="hidden"
                 />
+                {files.length > 0 && !uploadingFile && (
+                  <p className="ml-4 text-sm text-gray-500">
+                    {files.length} file(s) selected
+                  </p>
+                )}
+                {uploadingFile && (
+                  <div className="ml-4 flex items-center">
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <span className="text-sm text-gray-500">Uploading...</span>
+                  </div>
+                )}
               </div>
               
               {filePreviewUrls.length > 0 && (
@@ -277,7 +373,11 @@ const SubmitGrievance: React.FC = () => {
             </div>
             
             <div className="pt-4">
-              <Button type="submit" disabled={isSubmitting || user?.grievanceCredits === 0} className="w-full">
+              <Button 
+                type="submit" 
+                disabled={isSubmitting || user?.grievanceCredits === 0 || uploadingFile} 
+                className="w-full"
+              >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
