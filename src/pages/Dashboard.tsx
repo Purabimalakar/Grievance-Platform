@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -9,40 +8,94 @@ import { useAuth } from "@/context/AuthContext";
 import { Link } from "react-router-dom";
 import { PlusCircle, Clock, FileCheck, AlertCircle, BarChart3, Bell } from "lucide-react";
 import GrievanceCard from "@/components/GrievanceCard";
+import { ref, get, query, orderByChild, equalTo } from "firebase/database";
+import { rtdb } from "../config/firebase"; 
 
-// Mock grievance data
-const MOCK_GRIEVANCES = [
-  {
-    id: "GR78901",
-    title: "Water Shortage in Sector 9",
-    description: "There has been no water supply in our area for the past 3 days. This is causing significant inconvenience to residents.",
-    date: "July 15, 2023",
-    status: "pending" as const,
-    priority: "high" as const,
-  },
-  {
-    id: "GR78902",
-    title: "Garbage Collection Issue",
-    description: "The garbage has not been collected from our street for a week now. This is creating unsanitary conditions.",
-    date: "July 20, 2023",
-    status: "in-progress" as const,
-    priority: "normal" as const,
-  },
-  {
-    id: "GR78903",
-    title: "Street Light Repair",
-    description: "Several street lights on Main Road, Sector 7 are not working, making it unsafe at night.",
-    date: "July 25, 2023",
-    status: "resolved" as const,
-    priority: "normal" as const,
-  },
-];
+// Grievance type definition
+export type Grievance = {
+  id: string;
+  userId: string;
+  title: string;
+  description: string;
+  date: string;
+  status: "pending" | "in-progress" | "resolved";
+  priority: "normal" | "high" | "urgent";
+  attachments?: string[];
+};
 
 const Dashboard: React.FC = () => {
   const { user, isAuthenticated, isLoading, updateUserCredits } = useAuth();
   const { toast } = useToast();
-  const [grievances, setGrievances] = useState(MOCK_GRIEVANCES);
+  const [grievances, setGrievances] = useState<Grievance[]>([]);
+  const [isLoadingGrievances, setIsLoadingGrievances] = useState(true);
   
+  // Fetch user's grievances from Firebase
+  useEffect(() => {
+    const fetchGrievances = async () => {
+      if (!user || !user.id) {
+        console.log("No valid user ID found");
+        setIsLoadingGrievances(false);
+        return;
+      }
+      
+      try {
+        setIsLoadingGrievances(true);
+        
+        // Query grievances for the current user
+        const grievancesRef = ref(rtdb, 'grievances');
+        
+        console.log("Querying grievances for user ID:", user.id);
+        
+        const userGrievancesQuery = query(
+          grievancesRef, 
+          orderByChild('userId'), 
+          equalTo(user.id) // using user.id instead of user.uid
+        );
+        
+        const snapshot = await get(userGrievancesQuery);
+        
+        if (snapshot.exists()) {
+          const grievancesData: Grievance[] = [];
+          
+          snapshot.forEach((childSnapshot) => {
+            const grievance = childSnapshot.val();
+            grievancesData.push({
+              id: childSnapshot.key || '',
+              ...grievance
+            });
+          });
+          
+          // Sort by date (newest first)
+          grievancesData.sort((a, b) => {
+            return new Date(b.date).getTime() - new Date(a.date).getTime();
+          });
+          
+          setGrievances(grievancesData);
+          console.log(`Found ${grievancesData.length} grievances`);
+        } else {
+          console.log("No grievances found for this user");
+          setGrievances([]);
+        }
+      } catch (error) {
+        console.error("Error fetching grievances:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load your grievances. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoadingGrievances(false);
+      }
+    };
+    
+    if (user) {
+      fetchGrievances();
+    } else {
+      setIsLoadingGrievances(false);
+    }
+  }, [user, toast]);
+  
+  // Check for credit updates
   useEffect(() => {
     // Check if user needs credit update (24 hours have passed since last update)
     if (user && user.grievanceCredits < 3) {
@@ -61,7 +114,7 @@ const Dashboard: React.FC = () => {
         });
       }
     }
-  }, [user]);
+  }, [user, updateUserCredits, toast]);
   
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -100,7 +153,7 @@ const Dashboard: React.FC = () => {
             </Card>
             
             <Link to="/submit-grievance">
-              <Button className="w-full sm:w-auto">
+              <Button className="w-full sm:w-auto" disabled={user?.grievanceCredits === 0}>
                 Submit New Grievance
               </Button>
             </Link>
@@ -147,7 +200,10 @@ const Dashboard: React.FC = () => {
         </div>
         
         {/* Notifications */}
-        {grievances.some(g => g.status === "pending" && new Date(g.date) < new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) && (
+        {grievances.some(g => 
+          g.status === "pending" && 
+          new Date(g.date).getTime() < (Date.now() - 7 * 24 * 60 * 60 * 1000)
+        ) && (
           <div className="mb-8">
             <Card className="border-red-200 bg-red-50">
               <CardContent className="p-4 flex items-start space-x-4">
@@ -174,60 +230,69 @@ const Dashboard: React.FC = () => {
             <TabsTrigger value="resolved">Resolved</TabsTrigger>
           </TabsList>
           
-          <TabsContent value="all" className="space-y-6">
-            {grievances.length > 0 ? (
-              grievances.map(grievance => (
-                <GrievanceCard key={grievance.id} {...grievance} />
-              ))
-            ) : (
-              <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Grievances Found</h3>
-                <p className="text-gray-600 mb-4">You haven't submitted any grievances yet.</p>
-                <Link to="/submit-grievance">
-                  <Button>Submit a Grievance</Button>
-                </Link>
-              </div>
-            )}
-          </TabsContent>
-          
-          <TabsContent value="pending" className="space-y-6">
-            {pendingGrievances.length > 0 ? (
-              pendingGrievances.map(grievance => (
-                <GrievanceCard key={grievance.id} {...grievance} />
-              ))
-            ) : (
-              <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Pending Grievances</h3>
-                <p className="text-gray-600">You don't have any grievances in the pending state.</p>
-              </div>
-            )}
-          </TabsContent>
-          
-          <TabsContent value="in-progress" className="space-y-6">
-            {inProgressGrievances.length > 0 ? (
-              inProgressGrievances.map(grievance => (
-                <GrievanceCard key={grievance.id} {...grievance} />
-              ))
-            ) : (
-              <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No In-Progress Grievances</h3>
-                <p className="text-gray-600">You don't have any grievances in the in-progress state.</p>
-              </div>
-            )}
-          </TabsContent>
-          
-          <TabsContent value="resolved" className="space-y-6">
-            {resolvedGrievances.length > 0 ? (
-              resolvedGrievances.map(grievance => (
-                <GrievanceCard key={grievance.id} {...grievance} />
-              ))
-            ) : (
-              <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Resolved Grievances</h3>
-                <p className="text-gray-600">You don't have any resolved grievances yet.</p>
-              </div>
-            )}
-          </TabsContent>
+          {isLoadingGrievances ? (
+            <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Loading Grievances...</h3>
+              <p className="text-gray-600">Please wait while we fetch your grievances.</p>
+            </div>
+          ) : (
+            <>
+              <TabsContent value="all" className="space-y-6">
+                {grievances.length > 0 ? (
+                  grievances.map(grievance => (
+                    <GrievanceCard key={grievance.id} {...grievance} />
+                  ))
+                ) : (
+                  <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Grievances Found</h3>
+                    <p className="text-gray-600 mb-4">You haven't submitted any grievances yet.</p>
+                    <Link to="/submit-grievance">
+                      <Button disabled={user?.grievanceCredits === 0}>Submit a Grievance</Button>
+                    </Link>
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="pending" className="space-y-6">
+                {pendingGrievances.length > 0 ? (
+                  pendingGrievances.map(grievance => (
+                    <GrievanceCard key={grievance.id} {...grievance} />
+                  ))
+                ) : (
+                  <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Pending Grievances</h3>
+                    <p className="text-gray-600">You don't have any grievances in the pending state.</p>
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="in-progress" className="space-y-6">
+                {inProgressGrievances.length > 0 ? (
+                  inProgressGrievances.map(grievance => (
+                    <GrievanceCard key={grievance.id} {...grievance} />
+                  ))
+                ) : (
+                  <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No In-Progress Grievances</h3>
+                    <p className="text-gray-600">You don't have any grievances in the in-progress state.</p>
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="resolved" className="space-y-6">
+                {resolvedGrievances.length > 0 ? (
+                  resolvedGrievances.map(grievance => (
+                    <GrievanceCard key={grievance.id} {...grievance} />
+                  ))
+                ) : (
+                  <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Resolved Grievances</h3>
+                    <p className="text-gray-600">You don't have any resolved grievances yet.</p>
+                  </div>
+                )}
+              </TabsContent>
+            </>
+          )}
         </Tabs>
       </div>
     </div>
