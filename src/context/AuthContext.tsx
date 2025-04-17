@@ -81,7 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const snapshot = await get(userRef);
           
           if (snapshot.exists()) {
-            // User exists in database
+            // User exists in database - use data exactly as stored
             const userData = snapshot.val();
             setUser({
               id: firebaseUser.uid,
@@ -89,23 +89,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               email: firebaseUser.email || "",
               mobile: userData.mobile || "",
               isAdmin: userData.isAdmin || false,
-              grievanceCredits: userData.grievanceCredits || 3,
+              // Use exactly what's in the database for credits - don't reset
+              grievanceCredits: userData.grievanceCredits !== undefined ? userData.grievanceCredits : 0,
               lastCreditUpdate: userData.lastCreditUpdate || new Date().toISOString(),
               emailVerified: firebaseUser.emailVerified,
-              photoURL: firebaseUser.photoURL || null // Changed from undefined to null
+              photoURL: firebaseUser.photoURL || null
             });
           } else {
-            // Create new user record in database
+            // Create new user record in database - only first-time users get 3 credits
             const newUser: User = {
               id: firebaseUser.uid,
               name: firebaseUser.displayName || "",
               email: firebaseUser.email || "",
               mobile: "",
               isAdmin: false,
-              grievanceCredits: 3,
+              grievanceCredits: 3, // Only new users get 3 initial credits
               lastCreditUpdate: new Date().toISOString(),
               emailVerified: firebaseUser.emailVerified,
-              photoURL: firebaseUser.photoURL || null // Changed from undefined to null
+              photoURL: firebaseUser.photoURL || null
             };
             
             await set(userRef, newUser);
@@ -452,4 +453,11 @@ export const useAuth = () => {
     throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
+};
+
+// Helper function to determine where to redirect user based on role
+export const getRedirectPath = (user: User | null) => {
+  if (!user) return "/login";
+  if (user.isAdmin) return "/admin";
+  return "/dashboard";
 };

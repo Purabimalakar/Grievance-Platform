@@ -508,12 +508,14 @@ const TrackGrievance: React.FC = () => {
                 </CardContent>
               </Card>
               
-              {isAuthenticated && (
+              {(isAuthenticated && (user?.id === grievance.userId || user?.isAdmin)) && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg">Add a Comment</CardTitle>
                     <CardDescription>
-                      Provide additional information or ask about the status of your grievance.
+                      {user?.isAdmin 
+                        ? "Add an official response or request more information." 
+                        : "Provide additional information or ask about the status of your grievance."}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

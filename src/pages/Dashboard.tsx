@@ -8,8 +8,11 @@ import { useAuth } from "@/context/AuthContext";
 import { Link } from "react-router-dom";
 import { PlusCircle, Clock, FileCheck, AlertCircle, BarChart3, Bell } from "lucide-react";
 import GrievanceCard from "@/components/GrievanceCard";
-import { ref, get, query, orderByChild, equalTo } from "firebase/database";
+import { ref, get, query, orderByChild, equalTo, push } from "firebase/database";
 import { rtdb } from "../config/firebase"; 
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 // Grievance type definition
 export type Grievance = {
@@ -24,14 +27,18 @@ export type Grievance = {
 };
 
 const Dashboard: React.FC = () => {
-  const { user, isAuthenticated, isLoading, updateUserCredits } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
   const [grievances, setGrievances] = useState<Grievance[]>([]);
   const [isLoadingGrievances, setIsLoadingGrievances] = useState(true);
+  const [hasActiveRequest, setHasActiveRequest] = useState(false);
+  const [userWarnings, setUserWarnings] = useState<any[]>([]);
+  const [showWarningDetails, setShowWarningDetails] = useState(false);
+  const [selectedWarning, setSelectedWarning] = useState<any>(null);
   
-  // Fetch user's grievances from Firebase
+  // Check for existing credit requests and fetch grievances
   useEffect(() => {
-    const fetchGrievances = async () => {
+    const fetchData = async () => {
       if (!user || !user.id) {
         console.log("No valid user ID found");
         setIsLoadingGrievances(false);
@@ -41,7 +48,46 @@ const Dashboard: React.FC = () => {
       try {
         setIsLoadingGrievances(true);
         
-        // Query grievances for the current user
+        // First check if user has active credit requests
+        const creditRequestsRef = ref(rtdb, 'creditRequests');
+        const creditSnapshot = await get(creditRequestsRef);
+        
+        if (creditSnapshot.exists()) {
+          const requests = Object.values(creditSnapshot.val());
+          const hasRequest = requests.some((req: any) => 
+            req.userId === user.id && req.status === "pending"
+          );
+          setHasActiveRequest(hasRequest);
+        }
+        
+        // Fetch user warnings
+        const userRef = ref(rtdb, `users/${user.id}`);
+        const userSnapshot = await get(userRef);
+        
+        if (userSnapshot.exists()) {
+          const userData = userSnapshot.val();
+          if (userData.warnings && userData.warnings > 0) {
+            // Check for warning notifications
+            const notificationsRef = ref(rtdb, `notifications/${user.id}`);
+            const notificationsSnapshot = await get(notificationsRef);
+            
+            if (notificationsSnapshot.exists()) {
+              const notificationsData = notificationsSnapshot.val();
+              const warningNotifications = Object.keys(notificationsData)
+                .filter(key => notificationsData[key].type === "warning")
+                .map(key => ({
+                  id: key,
+                  ...notificationsData[key],
+                  date: new Date(notificationsData[key].date)
+                }))
+                .sort((a, b) => b.date.getTime() - a.date.getTime());
+              
+              setUserWarnings(warningNotifications);
+            }
+          }
+        }
+        
+        // Then fetch grievances
         const grievancesRef = ref(rtdb, 'grievances');
         
         console.log("Querying grievances for user ID:", user.id);
@@ -49,7 +95,7 @@ const Dashboard: React.FC = () => {
         const userGrievancesQuery = query(
           grievancesRef, 
           orderByChild('userId'), 
-          equalTo(user.id) // using user.id instead of user.uid
+          equalTo(user.id)
         );
         
         const snapshot = await get(userGrievancesQuery);
@@ -89,32 +135,14 @@ const Dashboard: React.FC = () => {
     };
     
     if (user) {
-      fetchGrievances();
+      fetchData();
     } else {
       setIsLoadingGrievances(false);
     }
   }, [user, toast]);
   
-  // Check for credit updates
-  useEffect(() => {
-    // Check if user needs credit update (24 hours have passed since last update)
-    if (user && user.grievanceCredits < 3) {
-      const lastUpdate = new Date(user.lastCreditUpdate);
-      const now = new Date();
-      const hoursPassed = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60);
-      
-      if (hoursPassed >= 24) {
-        // Add one credit (up to max of 3)
-        const newCredits = Math.min(user.grievanceCredits + 1, 3);
-        updateUserCredits(newCredits);
-        
-        toast({
-          title: "Credit Updated",
-          description: `You've received a new grievance submission credit. Total credits: ${newCredits}`,
-        });
-      }
-    }
-  }, [user, updateUserCredits, toast]);
+  // NOTE: Automatic credit renewal has been removed to prevent unauthorized refills
+  // Credits should only be refilled through admin approval
   
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -159,6 +187,82 @@ const Dashboard: React.FC = () => {
             </Link>
           </div>
         </div>
+        
+        {user?.grievanceCredits === 0 && (
+          <div className="flex items-center justify-end">
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline" disabled={hasActiveRequest}>
+                  {hasActiveRequest ? "Request Pending" : "Request More Credits"}
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Request Credits</DialogTitle>
+                  <DialogDescription>
+                    Provide a detailed reason why you need additional grievance credits.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formElement = e.target as HTMLFormElement;
+                  const reasonInput = formElement.querySelector('#credit-reason') as HTMLTextAreaElement;
+                  const reason = reasonInput?.value;
+                  
+                  if (!reason || reason.trim().length < 10) {
+                    toast({
+                      title: "Detailed Reason Required",
+                      description: "Please provide a specific reason with at least 10 characters.",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  
+                  try {
+                    // Push a credit request to Firebase with the reason
+                    const creditRequestsRef = ref(rtdb, 'creditRequests');
+                    await push(creditRequestsRef, {
+                      userId: user.id,
+                      userName: user.name,
+                      currentCredits: user.grievanceCredits,
+                      requestDate: new Date().toISOString(),
+                      status: "pending",
+                      reason: reason.trim()
+                    });
+                    
+                    toast({
+                      title: "Credit Request Submitted",
+                      description: "Your request for additional credits has been sent to administrators.",
+                    });
+                    
+                    // Close dialog by clicking the close button
+                    const closeButton = document.querySelector('[data-dialog-close]') as HTMLButtonElement;
+                    if (closeButton) closeButton.click();
+                  } catch (error) {
+                    toast({
+                      title: "Request Failed",
+                      description: "Failed to submit your request. Please try again.",
+                      variant: "destructive",
+                    });
+                  }
+                }} className="space-y-4 mt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="credit-reason">Reason for Request</Label>
+                    <Textarea 
+                      id="credit-reason" 
+                      placeholder="Please explain why you need additional grievance credits..."
+                      required
+                      className="min-h-[100px]"
+                    />
+                  </div>
+                  <DialogFooter>
+                    <Button type="submit">Submit Request</Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+        )}
         
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

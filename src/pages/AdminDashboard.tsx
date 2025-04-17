@@ -1,257 +1,603 @@
-
-import React, { useState } from "react";
-import { Navigate } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
-import { AlertTriangle, CheckSquare, Clock, UserX, UserCheck, PlusCircle, Search, ExternalLink, BadgeAlert } from "lucide-react";
+import { 
+  AlertTriangle, CheckSquare, Clock, UserX, UserCheck, PlusCircle, 
+  Search, ExternalLink, BadgeAlert, Loader2
+} from "lucide-react";
 import GrievanceCard from "@/components/GrievanceCard";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { rtdb } from "@/config/firebase";
+import { ref, get, update, remove, set, onValue, off, push } from "firebase/database";
+import { Grievance } from "@/types/grievance";
+import { useAdmin } from "@/hooks/useAdmin";
+import StatusBadge from "@/components/StatusBadge";
+import PriorityBadge from "@/components/PriorityBadge";
 
-// Mock grievance data
-const MOCK_GRIEVANCES = [
-  {
-    id: "GR78901",
-    title: "Water Shortage in Sector 9",
-    description: "There has been no water supply in our area for the past 3 days. This is causing significant inconvenience to residents.",
-    date: "July 15, 2023",
-    status: "pending" as const,
-    priority: "high" as const,
-    submittedBy: "Rahul Sharma",
-  },
-  {
-    id: "GR78902",
-    title: "Garbage Collection Issue",
-    description: "The garbage has not been collected from our street for a week now. This is creating unsanitary conditions.",
-    date: "July 20, 2023",
-    status: "in-progress" as const,
-    priority: "normal" as const,
-    submittedBy: "Priya Patel",
-  },
-  {
-    id: "GR78903",
-    title: "Street Light Repair",
-    description: "Several street lights on Main Road, Sector 7 are not working, making it unsafe at night.",
-    date: "July 25, 2023",
-    status: "resolved" as const,
-    priority: "normal" as const,
-    submittedBy: "Amit Kumar",
-  },
-  {
-    id: "GR78904",
-    title: "Assault Case in Residential Area",
-    description: "I was attacked by a group of people near my house. This is a serious matter and I need immediate police protection.",
-    date: "July 26, 2023",
-    status: "pending" as const,
-    priority: "urgent" as const,
-    submittedBy: "Vikram Singh",
-  },
-  {
-    id: "GR78905",
-    title: "Illegal Construction in Public Space",
-    description: "Someone is constructing a building on public property near the park in Sector 12. This needs to be investigated.",
-    date: "July 28, 2023",
-    status: "in-progress" as const,
-    priority: "high" as const,
-    submittedBy: "Neha Gupta",
-  },
-];
-
-// Mock user data for user management
-const MOCK_USERS = [
-  {
-    id: "USR001",
-    name: "Rahul Sharma",
-    mobile: "9876543210",
-    email: "rahul@example.com",
-    grievanceCount: 3,
-    status: "active",
-    lastActivity: "July 26, 2023",
-  },
-  {
-    id: "USR002",
-    name: "Priya Patel",
-    mobile: "9876543211",
-    email: "priya@example.com",
-    grievanceCount: 5,
-    status: "active",
-    lastActivity: "July 25, 2023",
-  },
-  {
-    id: "USR003",
-    name: "Amit Kumar",
-    mobile: "9876543212",
-    email: "amit@example.com",
-    grievanceCount: 2,
-    status: "warned",
-    lastActivity: "July 24, 2023",
-  },
-  {
-    id: "USR004",
-    name: "Vikram Singh",
-    mobile: "9876543213",
-    email: "vikram@example.com",
-    grievanceCount: 7,
-    status: "active",
-    lastActivity: "July 26, 2023",
-  },
-  {
-    id: "USR005",
-    name: "Neha Gupta",
-    mobile: "9876543214",
-    email: "neha@example.com",
-    grievanceCount: 1,
-    status: "blocked",
-    lastActivity: "July 20, 2023",
-  },
-];
-
-// Mock credit requests
-const MOCK_CREDIT_REQUESTS = [
-  {
-    id: "REQ001",
-    userId: "USR001",
-    userName: "Rahul Sharma",
-    currentCredits: 0,
-    requestDate: "July 26, 2023",
-    reason: "Need to submit urgent municipal grievance",
-    status: "pending",
-  },
-  {
-    id: "REQ002",
-    userId: "USR002",
-    userName: "Priya Patel",
-    currentCredits: 1,
-    requestDate: "July 25, 2023",
-    reason: "Multiple issues in neighborhood that need attention",
-    status: "pending",
-  },
-];
+// Admin credentials
+const ADMIN_CREDENTIALS = {
+  email: "admin@raisevoice.com",
+  password: "Admin@123"
+};
 
 const AdminDashboard: React.FC = () => {
+  // State variables
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
   const [userSearchTerm, setUserSearchTerm] = useState("");
-  const [urgentGrievances, setUrgentGrievances] = useState(MOCK_GRIEVANCES.filter(g => g.priority === "urgent"));
-  const [pendingGrievances, setPendingGrievances] = useState(MOCK_GRIEVANCES.filter(g => g.status === "pending"));
-  const [allGrievances, setAllGrievances] = useState(MOCK_GRIEVANCES);
-  const [users, setUsers] = useState(MOCK_USERS);
-  const [creditRequests, setCreditRequests] = useState(MOCK_CREDIT_REQUESTS);
+  const [urgentGrievances, setUrgentGrievances] = useState<Grievance[]>([]);
+  const [pendingGrievances, setPendingGrievances] = useState<Grievance[]>([]);
+  const [allGrievances, setAllGrievances] = useState<Grievance[]>([]);
+  const [overviewGrievances, setOverviewGrievances] = useState<Grievance[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [creditRequests, setCreditRequests] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [selectedGrievance, setSelectedGrievance] = useState<Grievance | null>(null);
   const [warnDialogOpen, setWarnDialogOpen] = useState(false);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
+  const [viewGrievanceDialogOpen, setViewGrievanceDialogOpen] = useState(false);
   const [warningReason, setWarningReason] = useState("");
   const [blockReason, setBlockReason] = useState("");
+  const [adminComment, setAdminComment] = useState("");
+  const [creditsToGrant, setCreditsToGrant] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
   
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
+  
+  // Fetch data from Firebase when component mounts
+  useEffect(() => {
+    if (!isAuthenticated || authLoading) return;
+    
+    // Fetch all grievances
+    const grievancesRef = ref(rtdb, 'grievances');
+    const grievanceListener = onValue(grievancesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const grievancesData = snapshot.val();
+        const grievancesArray = Object.keys(grievancesData).map(key => ({
+          id: key,
+          ...grievancesData[key]
+        }));
+        
+        setAllGrievances(grievancesArray);
+        setUrgentGrievances(grievancesArray.filter(g => g.priority === "urgent" && g.status !== "resolved"));
+        setPendingGrievances(grievancesArray.filter(g => g.status === "pending"));
+        // Filter out resolved grievances for the Overview section
+        const nonResolvedGrievances = grievancesArray.filter(g => g.status !== "resolved");
+        setOverviewGrievances(nonResolvedGrievances);
+      } else {
+        setAllGrievances([]);
+        setUrgentGrievances([]);
+        setPendingGrievances([]);
+        setOverviewGrievances([]);
+      }
+      setIsLoading(false);
+    });
+    
+    // Fetch all users
+    const usersRef = ref(rtdb, 'users');
+    const usersListener = onValue(usersRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const usersData = snapshot.val();
+        const usersArray = Object.keys(usersData).map(key => ({
+          id: key,
+          ...usersData[key],
+          grievanceCount: 0 // We'll update this count below
+        }));
+        
+        // Count grievances per user
+        if (allGrievances.length > 0) {
+          allGrievances.forEach(grievance => {
+            const userIndex = usersArray.findIndex(u => u.id === grievance.userId);
+            if (userIndex >= 0) {
+              usersArray[userIndex].grievanceCount += 1;
+            }
+          });
+        }
+        
+        setUsers(usersArray);
+      } else {
+        setUsers([]);
+      }
+    });
+    
+    // Fetch credit requests
+    const requestsRef = ref(rtdb, 'creditRequests');
+    const requestsListener = onValue(requestsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const requestsData = snapshot.val();
+        const requestsArray = Object.keys(requestsData)
+          .filter(key => requestsData[key].status === "pending")
+          .map(key => ({
+            id: key,
+            ...requestsData[key]
+          }));
+        
+        setCreditRequests(requestsArray);
+      } else {
+        setCreditRequests([]);
+      }
+    });
+    
+    return () => {
+      // Clean up listeners
+      off(grievancesRef, 'value', grievanceListener);
+      off(usersRef, 'value', usersListener);
+      off(requestsRef, 'value', requestsListener);
+    };
+  }, [isAuthenticated, authLoading, allGrievances.length]);
   
   // Filter users based on search term
   const filteredUsers = users.filter(u => 
-    u.name.toLowerCase().includes(userSearchTerm.toLowerCase()) || 
-    u.mobile.includes(userSearchTerm) ||
-    u.email.toLowerCase().includes(userSearchTerm.toLowerCase())
+    u.name?.toLowerCase().includes(userSearchTerm.toLowerCase()) || 
+    u.mobile?.includes(userSearchTerm) ||
+    u.email?.toLowerCase().includes(userSearchTerm.toLowerCase())
   );
   
-  // Filter grievances based on search term
-  const filteredGrievances = allGrievances.filter(g => 
-    g.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    g.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    g.id.includes(searchTerm) ||
-    g.submittedBy.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-  
-  const handleUpdateGrievanceStatus = (id: string, newStatus: "pending" | "in-progress" | "resolved") => {
-    // Update the grievance status
-    const updatedGrievances = allGrievances.map(g => 
-      g.id === id ? { ...g, status: newStatus } : g
-    );
-    
-    setAllGrievances(updatedGrievances);
-    setPendingGrievances(updatedGrievances.filter(g => g.status === "pending"));
-    setUrgentGrievances(updatedGrievances.filter(g => g.priority === "urgent"));
-    
-    toast({
-      title: "Status Updated",
-      description: `Grievance ${id} status updated to ${newStatus}.`,
+  // Filter grievances based on search term and sort by status and date
+  const filteredGrievances = allGrievances
+    .filter(g => 
+      g.title?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      g.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      g.id?.includes(searchTerm) ||
+      g.submittedByName?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => {
+      // First sort by resolution status (unresolved first)
+      if (a.status === "resolved" && b.status !== "resolved") return 1;
+      if (a.status !== "resolved" && b.status === "resolved") return -1;
+      
+      // Then sort by date (newest first for each group)
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
     });
+  
+  const handleUpdateGrievanceStatus = async (id: string, newStatus: "pending" | "in-progress" | "resolved") => {
+    try {
+      // Update the grievance status in Firebase
+      const grievanceRef = ref(rtdb, `grievances/${id}`);
+      
+      // Get the grievance first to get the submittedBy field
+      const grievanceSnapshot = await get(grievanceRef);
+      if (!grievanceSnapshot.exists()) {
+        toast({
+          title: "Error",
+          description: "Grievance not found.",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      const grievanceData = grievanceSnapshot.val();
+      const userId = grievanceData.userId;
+      
+      // Create notification
+      const notificationRef = ref(rtdb, `notifications/${userId}/${Date.now()}`);
+      await set(notificationRef, {
+        type: "status_update",
+        grievanceId: id,
+        status: newStatus,
+        message: `Your grievance status has been updated to ${newStatus}.`,
+        date: new Date().toISOString(),
+        read: false
+      });
+      
+      // Add admin comment if provided
+      if (adminComment.trim()) {
+        const comments = grievanceData.comments || [];
+        comments.push({
+          id: Date.now().toString(),
+          text: adminComment,
+          date: new Date().toISOString(),
+          userId: user?.id || 'admin',
+          userName: user?.name || 'Admin'
+        });
+        
+        await update(grievanceRef, { 
+          status: newStatus,
+          lastUpdated: new Date().toISOString(),
+          comments
+        });
+        
+        setAdminComment(""); // Clear comment field
+      } else {
+        await update(grievanceRef, { 
+          status: newStatus,
+          lastUpdated: new Date().toISOString()
+        });
+      }
+      
+      toast({
+        title: "Status Updated",
+        description: `Grievance status updated to ${newStatus}.`,
+      });
+    } catch (error) {
+      console.error("Error updating grievance status:", error);
+      toast({
+        title: "Update Failed",
+        description: "Failed to update grievance status. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
   
-  const handleWarnUser = () => {
+  const handleWarnUser = async () => {
     if (!selectedUser || !warningReason) return;
     
-    // Update the user status
-    const updatedUsers = users.map(u => 
-      u.id === selectedUser.id ? { ...u, status: "warned" } : u
-    );
-    
-    setUsers(updatedUsers);
-    setWarnDialogOpen(false);
-    setWarningReason("");
-    
-    toast({
-      title: "User Warned",
-      description: `Warning has been sent to ${selectedUser.name}.`,
-    });
+    try {
+      // Get current warnings count
+      const userRef = ref(rtdb, `users/${selectedUser.id}`);
+      const userSnapshot = await get(userRef);
+      
+      if (userSnapshot.exists()) {
+        const userData = userSnapshot.val();
+        const warnings = userData.warnings || 0;
+        
+        // Update the user status and warnings count
+        await update(userRef, { 
+          status: "warned",
+          warnings: warnings + 1,
+          warningReason,
+          lastWarningDate: new Date().toISOString()
+        });
+        
+        // Create a notification for the user
+        const notificationRef = ref(rtdb, `notifications/${selectedUser.id}/${Date.now()}`);
+        await set(notificationRef, {
+          type: "warning",
+          message: `Warning: ${warningReason}`,
+          date: new Date().toISOString(),
+          read: false
+        });
+        
+        setWarnDialogOpen(false);
+        setWarningReason("");
+        
+        toast({
+          title: "User Warned",
+          description: `Warning has been sent to ${selectedUser.name}.`,
+        });
+      }
+    } catch (error) {
+      console.error("Error warning user:", error);
+      toast({
+        title: "Warning Failed",
+        description: "Failed to warn user. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
   
-  const handleBlockUser = () => {
+  const handleBlockUser = async () => {
     if (!selectedUser || !blockReason) return;
     
-    // Update the user status
-    const updatedUsers = users.map(u => 
-      u.id === selectedUser.id ? { ...u, status: "blocked" } : u
-    );
-    
-    setUsers(updatedUsers);
-    setBlockDialogOpen(false);
-    setBlockReason("");
-    
-    toast({
-      title: "User Blocked",
-      description: `${selectedUser.name} has been blocked from the platform.`,
-    });
+    try {
+      // Update the user status
+      const userRef = ref(rtdb, `users/${selectedUser.id}`);
+      await update(userRef, { 
+        status: "blocked",
+        blockReason,
+        blockDate: new Date().toISOString()
+      });
+      
+      // Create a notification for the user
+      const notificationRef = ref(rtdb, `notifications/${selectedUser.id}/${Date.now()}`);
+      await set(notificationRef, {
+        type: "blocked",
+        message: `Your account has been blocked. Reason: ${blockReason}`,
+        date: new Date().toISOString(),
+        read: false
+      });
+      
+      setBlockDialogOpen(false);
+      setBlockReason("");
+      
+      toast({
+        title: "User Blocked",
+        description: `${selectedUser.name} has been blocked from the platform.`,
+      });
+    } catch (error) {
+      console.error("Error blocking user:", error);
+      toast({
+        title: "Block Failed",
+        description: "Failed to block user. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
   
-  const handleApproveCredits = (requestId: string) => {
-    // Update the credit request status
-    const updatedRequests = creditRequests.map(r => 
-      r.id === requestId ? { ...r, status: "approved" } : r
-    );
-    
-    setCreditRequests(updatedRequests.filter(r => r.status === "pending"));
-    
-    toast({
-      title: "Credits Approved",
-      description: "Additional submission credits have been granted to the user.",
-    });
+  const handleUnblockUser = async (userId: string) => {
+    try {
+      // Update the user status
+      const userRef = ref(rtdb, `users/${userId}`);
+      await update(userRef, { 
+        status: "active",
+        unblockDate: new Date().toISOString()
+      });
+      
+      toast({
+        title: "User Unblocked",
+        description: "User has been unblocked successfully.",
+      });
+    } catch (error) {
+      console.error("Error unblocking user:", error);
+      toast({
+        title: "Unblock Failed",
+        description: "Failed to unblock user. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
   
-  const handleRejectCredits = (requestId: string) => {
-    // Update the credit request status
-    const updatedRequests = creditRequests.map(r => 
-      r.id === requestId ? { ...r, status: "rejected" } : r
-    );
-    
-    setCreditRequests(updatedRequests.filter(r => r.status === "pending"));
-    
-    toast({
-      title: "Request Rejected",
-      description: "Credit request has been rejected.",
-    });
+  const handleApproveCredits = async (requestId: string) => {
+    try {
+      // Get request data
+      const requestRef = ref(rtdb, `creditRequests/${requestId}`);
+      const requestSnapshot = await get(requestRef);
+      
+      if (requestSnapshot.exists()) {
+        const requestData = requestSnapshot.val();
+        const userId = requestData.userId;
+        
+        // Validate that the request has a proper reason
+        if (!requestData.reason || requestData.reason.trim().length < 10) {
+          toast({
+            title: "Invalid Request",
+            description: "This request doesn't have a valid reason. Ask the user to provide more details.",
+            variant: "destructive"
+          });
+          return;
+        }
+        
+        // Update request status
+        await update(requestRef, { 
+          status: "approved",
+          approvedAt: new Date().toISOString(),
+          creditsGranted: creditsToGrant,
+          approvedBy: user?.id || 'admin',
+          approvedByName: user?.name || 'Admin'
+        });
+        
+        // Update user credits
+        const userRef = ref(rtdb, `users/${userId}`);
+        const userSnapshot = await get(userRef);
+        
+        if (userSnapshot.exists()) {
+          const userData = userSnapshot.val();
+          const currentCredits = userData.grievanceCredits || 0;
+          
+          await update(userRef, {
+            grievanceCredits: currentCredits + creditsToGrant,
+            lastCreditUpdate: new Date().toISOString()
+          });
+          
+          // Create notification for user
+          const notificationRef = ref(rtdb, `notifications/${userId}/${Date.now()}`);
+          await set(notificationRef, {
+            type: "credits",
+            message: `Your request for additional credits has been approved. You have been granted ${creditsToGrant} credit(s).`,
+            date: new Date().toISOString(),
+            read: false
+          });
+        }
+        
+        toast({
+          title: "Credits Approved",
+          description: `${creditsToGrant} credit(s) have been granted to the user.`,
+        });
+      }
+    } catch (error) {
+      console.error("Error approving credits:", error);
+      toast({
+        title: "Approval Failed",
+        description: "Failed to approve credit request. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
   
-  if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  const handleRejectCredits = async (requestId: string) => {
+    try {
+      // Get request data
+      const requestRef = ref(rtdb, `creditRequests/${requestId}`);
+      const requestSnapshot = await get(requestRef);
+      
+      if (requestSnapshot.exists()) {
+        const requestData = requestSnapshot.val();
+        const userId = requestData.userId;
+        
+        // Update request status
+        await update(requestRef, { 
+          status: "rejected",
+          rejectedAt: new Date().toISOString(),
+          rejectedBy: user?.id || 'admin',
+          rejectedByName: user?.name || 'Admin'
+        });
+        
+        // Create notification for user
+        const notificationRef = ref(rtdb, `notifications/${userId}/${Date.now()}`);
+        await set(notificationRef, {
+          type: "credits-rejected",
+          message: "Your request for additional credits has been rejected.",
+          date: new Date().toISOString(),
+          read: false
+        });
+        
+        toast({
+          title: "Request Rejected",
+          description: "Credit request has been rejected.",
+        });
+      }
+    } catch (error) {
+      console.error("Error rejecting credits:", error);
+      toast({
+        title: "Rejection Failed",
+        description: "Failed to reject credit request. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Function to assign a grievance to an admin
+  const handleAssignGrievance = async (grievanceId: string) => {
+    if (!user) return;
+    
+    try {
+      // Update grievance to assign it to current admin
+      const grievanceRef = ref(rtdb, `grievances/${grievanceId}`);
+      await update(grievanceRef, {
+        assignedTo: user.id,
+        assignedName: user.name,
+        status: "in-progress",
+        lastUpdated: new Date().toISOString()
+      });
+      
+      toast({
+        title: "Grievance Assigned",
+        description: `Grievance has been assigned to you.`,
+      });
+    } catch (error) {
+      console.error("Error assigning grievance:", error);
+      toast({
+        title: "Assignment Failed",
+        description: "Failed to assign grievance. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+  
+  // Function to add a comment without changing status
+  const handleAddCommentOnly = async (grievanceId: string) => {
+    if (!adminComment.trim()) {
+      toast({
+        title: "Comment Required",
+        description: "Please enter a comment before submitting.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    try {
+      // Get the current grievance data
+      const grievanceRef = ref(rtdb, `grievances/${grievanceId}`);
+      const grievanceSnapshot = await get(grievanceRef);
+      
+      if (grievanceSnapshot.exists()) {
+        const grievanceData = grievanceSnapshot.val();
+        const comments = grievanceData.comments || [];
+        const userId = grievanceData.userId;
+        
+        // Add the new comment
+        comments.push({
+          id: Date.now().toString(),
+          text: adminComment,
+          date: new Date().toISOString(),
+          userId: user?.id || 'admin',
+          userName: user?.name || 'Admin'
+        });
+        
+        // Update the grievance with the new comment
+        await update(grievanceRef, { 
+          comments,
+          lastUpdated: new Date().toISOString()
+        });
+        
+        // Create notification for the user
+        const notificationRef = ref(rtdb, `notifications/${userId}/${Date.now()}`);
+        await set(notificationRef, {
+          type: "comment",
+          grievanceId: grievanceId,
+          message: `An admin has commented on your grievance.`,
+          date: new Date().toISOString(),
+          read: false
+        });
+        
+        setAdminComment(""); // Clear comment field
+        
+        toast({
+          title: "Comment Added",
+          description: "Your comment has been added successfully.",
+        });
+      }
+    } catch (error) {
+      console.error("Error adding comment:", error);
+      toast({
+        title: "Comment Failed",
+        description: "Failed to add comment. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+  
+  // Function to grant credits directly to a user
+  const handleGrantCreditsDirectly = async (userId: string, creditsToAdd: number) => {
+    try {
+      // Get user data
+      const userRef = ref(rtdb, `users/${userId}`);
+      const userSnapshot = await get(userRef);
+      
+      if (userSnapshot.exists()) {
+        const userData = userSnapshot.val();
+        const currentCredits = userData.grievanceCredits || 0;
+        
+        // Update user credits
+        await update(userRef, {
+          grievanceCredits: currentCredits + creditsToAdd,
+          lastCreditUpdate: new Date().toISOString()
+        });
+        
+        // Create notification for user
+        const notificationRef = ref(rtdb, `notifications/${userId}/${Date.now()}`);
+        await set(notificationRef, {
+          type: "credits-granted",
+          message: `An administrator has granted you ${creditsToAdd} additional grievance credit(s).`,
+          date: new Date().toISOString(),
+          read: false
+        });
+        
+        toast({
+          title: "Credits Granted",
+          description: `${creditsToAdd} credit(s) have been granted to the user.`,
+        });
+      }
+    } catch (error) {
+      console.error("Error granting credits:", error);
+      toast({
+        title: "Action Failed",
+        description: "Failed to grant credits to user. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // View grievance details
+  const handleViewGrievance = (grievance: Grievance) => {
+    setSelectedGrievance(grievance);
+    setAdminComment(""); // Reset comment when opening a new grievance
+    setViewGrievanceDialogOpen(true);
+  };
+
+  // Loading state
+  if (authLoading || isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+        <span className="ml-2">Loading dashboard...</span>
+      </div>
+    );
   }
   
+  // Redirect if not authenticated or not admin
   if (!isAuthenticated || !user?.isAdmin) {
-    return <Navigate to="/login" />;
+    return <Navigate to="/admin/login" />;
   }
   
   return (
@@ -298,8 +644,8 @@ const AdminDashboard: React.FC = () => {
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-500">Total Grievances</p>
-                      <p className="text-3xl font-bold">{allGrievances.length}</p>
+                      <p className="text-sm font-medium text-gray-500">Active Grievances</p>
+                      <p className="text-3xl font-bold">{overviewGrievances.length}</p>
                     </div>
                     <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center">
                       <ExternalLink className="h-6 w-6 text-blue-500" />
@@ -353,13 +699,73 @@ const AdminDashboard: React.FC = () => {
             
             {/* Recent Urgent Grievances */}
             <div>
-              <h2 className="text-xl font-semibold mb-4">Recent Urgent Grievances</h2>
+              <h2 className="text-xl font-semibold mb-4">Urgent Grievances</h2>
               
               <div className="space-y-4">
                 {urgentGrievances.slice(0, 3).map((grievance) => (
-                  <GrievanceCard key={grievance.id} {...grievance} />
+                  <div key={grievance.id} className="bg-white border border-red-200 rounded-lg shadow-sm overflow-hidden">
+                    <div className="p-6">
+                      <div className="flex flex-wrap justify-between items-start gap-2 mb-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="px-3 py-1 text-xs font-medium rounded-full border bg-red-50 text-red-700 border-red-200">
+                              Urgent
+                            </span>
+                            <StatusBadge status={grievance.status} />
+                          </div>
+                          <div className="flex items-center text-sm text-gray-500">
+                            <span>{new Date(grievance.date).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">{grievance.title}</h3>
+                      
+                      <p className="text-gray-700 mb-4 line-clamp-2">{grievance.description}</p>
+                      
+                      <div className="flex flex-wrap justify-between items-center">
+                        <div className="flex items-center space-x-4">
+                          <div className="flex items-center text-sm text-gray-500">
+                            <span>ID: {grievance.id.substring(0, 8)}...</span>
+                          </div>
+                          
+                          <div className="flex items-center text-sm text-gray-500">
+                            <span>By: {grievance.submittedByName || "Anonymous"}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex gap-2 mt-4 sm:mt-0">
+                          {grievance.status === "pending" && (
+                            <Button 
+                              size="sm" 
+                              onClick={() => handleUpdateGrievanceStatus(grievance.id, "in-progress")}
+                            >
+                              Start Processing
+                            </Button>
+                          )}
+                          
+                          {grievance.status === "in-progress" && (
+                            <Button 
+                              size="sm" 
+                              onClick={() => handleUpdateGrievanceStatus(grievance.id, "resolved")}
+                            >
+                              Mark as Resolved
+                            </Button>
+                          )}
+                          
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleViewGrievance(grievance)}
+                          >
+                            View Details
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 ))}
-                
+              
                 {urgentGrievances.length === 0 && (
                   <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No Urgent Grievances</h3>
@@ -367,7 +773,7 @@ const AdminDashboard: React.FC = () => {
                   </div>
                 )}
                 
-                {urgentGrievances.length > 0 && (
+                {urgentGrievances.length > 3 && (
                   <div className="text-center mt-4">
                     <Button variant="outline" onClick={() => setActiveTab("urgent")}>
                       View All Urgent Grievances
@@ -385,24 +791,36 @@ const AdminDashboard: React.FC = () => {
                 {creditRequests.slice(0, 3).map((request) => (
                   <Card key={request.id}>
                     <CardContent className="p-6">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div>
-                          <h3 className="text-lg font-semibold">{request.userName}</h3>
-                          <p className="text-gray-600 text-sm">Requested on {request.requestDate}</p>
-                          <p className="text-gray-700 mt-2">
-                            <span className="font-medium">Reason:</span> {request.reason}
-                          </p>
-                          <p className="text-gray-700 mt-1">
-                            <span className="font-medium">Current Credits:</span> {request.currentCredits}
-                          </p>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex flex-col gap-2 mb-2">
+                          <Label htmlFor="credits-to-grant">Credits to Grant</Label>
+                          <Select 
+                            value={creditsToGrant.toString()}
+                            onValueChange={(value) => setCreditsToGrant(parseInt(value))}
+                          >
+                            <SelectTrigger className="w-full" id="credits-to-grant">
+                              <SelectValue placeholder="Select number of credits" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="1">1 Credit</SelectItem>
+                              <SelectItem value="2">2 Credits</SelectItem>
+                              <SelectItem value="3">3 Credits (Full Refill)</SelectItem>
+                              <SelectItem value="5">5 Credits (Special Case)</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                         
                         <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={() => handleRejectCredits(request.id)}>
+                          <Button 
+                            variant="outline" 
+                            onClick={() => handleRejectCredits(request.id)}
+                          >
                             Reject
                           </Button>
-                          <Button size="sm" onClick={() => handleApproveCredits(request.id)}>
-                            Approve
+                          <Button 
+                            onClick={() => handleApproveCredits(request.id)}
+                          >
+                            Approve ({creditsToGrant} {creditsToGrant === 1 ? 'credit' : 'credits'})
                           </Button>
                         </div>
                       </div>
@@ -456,27 +874,13 @@ const AdminDashboard: React.FC = () => {
                     <div className="p-6">
                       <div className="flex flex-wrap justify-between items-start gap-2 mb-4">
                         <div className="flex space-x-2">
-                          {grievance.status === "pending" && (
-                            <span className="px-3 py-1 text-xs font-medium rounded-full border bg-yellow-50 text-yellow-700 border-yellow-200">
-                              Pending
-                            </span>
-                          )}
-                          {grievance.status === "in-progress" && (
-                            <span className="px-3 py-1 text-xs font-medium rounded-full border bg-blue-50 text-blue-700 border-blue-200">
-                              In Progress
-                            </span>
-                          )}
-                          {grievance.status === "resolved" && (
-                            <span className="px-3 py-1 text-xs font-medium rounded-full border bg-green-50 text-green-700 border-green-200">
-                              Resolved
-                            </span>
-                          )}
+                          <StatusBadge status={grievance.status} />
                           <span className="px-3 py-1 text-xs font-medium rounded-full border bg-red-50 text-red-700 border-red-200">
                             Urgent
                           </span>
                         </div>
                         <div className="flex items-center text-sm text-gray-500">
-                          <span>{grievance.date}</span>
+                          <span>{new Date(grievance.date).toLocaleDateString()}</span>
                         </div>
                       </div>
                       
@@ -491,7 +895,7 @@ const AdminDashboard: React.FC = () => {
                           </div>
                           
                           <div className="flex items-center text-sm text-gray-500">
-                            <span>By: {grievance.submittedBy}</span>
+                            <span>By: {grievance.submittedByName || "Anonymous"}</span>
                           </div>
                         </div>
                         
@@ -514,7 +918,11 @@ const AdminDashboard: React.FC = () => {
                             </Button>
                           )}
                           
-                          <Button variant="outline" size="sm">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleViewGrievance(grievance)}
+                          >
                             View Details
                           </Button>
                         </div>
@@ -530,7 +938,11 @@ const AdminDashboard: React.FC = () => {
               ).length === 0 && (
                 <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
                   <h3 className="text-lg font-medium text-gray-900 mb-2">No Urgent Grievances Found</h3>
-                  <p className="text-gray-600">There are no urgent grievances matching your search criteria.</p>
+                  {searchTerm ? (
+                    <p className="text-gray-600">No urgent grievances match your search query.</p>
+                  ) : (
+                    <p className="text-gray-600">There are no urgent grievances at the moment.</p>
+                  )}
                 </div>
               )}
             </div>
@@ -583,52 +995,24 @@ const AdminDashboard: React.FC = () => {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredGrievances.map((grievance) => (
-                        <tr key={grievance.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {grievance.id}
-                          </td>
+                        <tr key={grievance.id}>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            {grievance.id.substring(0, 8)}...
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             {grievance.title}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                            {grievance.submittedBy}
+                            {grievance.submittedByName || "Anonymous"}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                            {grievance.date}
+                            {new Date(grievance.date).toLocaleDateString()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            {grievance.status === "pending" && (
-                              <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                                Pending
-                              </span>
-                            )}
-                            {grievance.status === "in-progress" && (
-                              <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                                In Progress
-                              </span>
-                            )}
-                            {grievance.status === "resolved" && (
-                              <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                                Resolved
-                              </span>
-                            )}
+                            <StatusBadge status={grievance.status} />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            {grievance.priority === "normal" && (
-                              <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                                Normal
-                              </span>
-                            )}
-                            {grievance.priority === "high" && (
-                              <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
-                                High
-                              </span>
-                            )}
-                            {grievance.priority === "urgent" && (
-                              <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                                Urgent
-                              </span>
-                            )}
+                            <PriorityBadge priority={grievance.priority} />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <div className="flex justify-end gap-2">
@@ -652,7 +1036,11 @@ const AdminDashboard: React.FC = () => {
                                 </Button>
                               )}
                               
-                              <Button variant="ghost" size="sm">
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => handleViewGrievance(grievance)}
+                              >
                                 View
                               </Button>
                             </div>
@@ -697,7 +1085,7 @@ const AdminDashboard: React.FC = () => {
                     <thead className="bg-gray-50">
                       <tr>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          User
+                          Name
                         </th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Contact
@@ -717,13 +1105,13 @@ const AdminDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {filteredUsers.map((user) => (
-                        <tr key={user.id} className="hover:bg-gray-50">
+                      {filteredUsers.filter(u => !u.isAdmin).map((user) => (
+                        <tr key={user.id}>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center">
                               <div className="flex-shrink-0 h-10 w-10 bg-gray-200 rounded-full flex items-center justify-center">
                                 <span className="text-gray-600 font-medium">
-                                  {user.name.charAt(0)}
+                                  {user.name?.charAt(0)}
                                 </span>
                               </div>
                               <div className="ml-4">
@@ -731,7 +1119,7 @@ const AdminDashboard: React.FC = () => {
                                   {user.name}
                                 </div>
                                 <div className="text-sm text-gray-500">
-                                  ID: {user.id}
+                                  ID: {user.id.substring(0, 8)}...
                                 </div>
                               </div>
                             </div>
@@ -744,7 +1132,7 @@ const AdminDashboard: React.FC = () => {
                             {user.grievanceCount}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                            {user.lastActivity}
+                            {user.lastActivity ? new Date(user.lastActivity).toLocaleDateString() : 'N/A'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {user.status === "active" && (
@@ -767,8 +1155,52 @@ const AdminDashboard: React.FC = () => {
                             <div className="flex justify-end gap-2">
                               {user.status !== "blocked" && (
                                 <>
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button variant="outline" size="sm" className="border-green-200 text-green-600 hover:bg-green-50">
+                                        Grant Credits
+                                      </Button>
+                                    </DialogTrigger>
+                                    <DialogContent>
+                                      <DialogHeader>
+                                        <DialogTitle>Grant Credits to {user.name}</DialogTitle>
+                                        <DialogDescription>
+                                          Current credit balance: {user.grievanceCredits || 0} credits
+                                        </DialogDescription>
+                                      </DialogHeader>
+                                      <div className="py-4">
+                                        <Label htmlFor="credits-amount">Credits to Grant</Label>
+                                        <Select 
+                                          defaultValue="1"
+                                          onValueChange={(value) => setCreditsToGrant(parseInt(value))}
+                                        >
+                                          <SelectTrigger id="credits-amount" className="mt-2">
+                                            <SelectValue placeholder="Select number of credits" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="1">1 Credit</SelectItem>
+                                            <SelectItem value="2">2 Credits</SelectItem>
+                                            <SelectItem value="3">3 Credits (Full Refill)</SelectItem>
+                                            <SelectItem value="5">5 Credits (Special Case)</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <DialogFooter>
+                                        <Button 
+                                          onClick={() => {
+                                            handleGrantCreditsDirectly(user.id, creditsToGrant);
+                                            // Close the dialog
+                                            const closeButton = document.querySelector('[data-dialog-close]') as HTMLButtonElement;
+                                            if (closeButton) closeButton.click();
+                                          }}
+                                        >
+                                          Grant Credits
+                                        </Button>
+                                      </DialogFooter>
+                                    </DialogContent>
+                                  </Dialog>
                                   <Button 
-                                    variant="ghost" 
+                                    variant="outline" 
                                     size="sm"
                                     onClick={() => {
                                       setSelectedUser(user);
@@ -777,21 +1209,16 @@ const AdminDashboard: React.FC = () => {
                                   >
                                     Warn
                                   </Button>
-                                  <Button 
-                                    variant="ghost" 
-                                    size="sm"
-                                    onClick={() => {
-                                      setSelectedUser(user);
-                                      setBlockDialogOpen(true);
-                                    }}
-                                    className="text-red-600 hover:text-red-800"
-                                  >
-                                    Block
-                                  </Button>
                                 </>
                               )}
+                              
                               {user.status === "blocked" && (
-                                <Button variant="ghost" size="sm" className="text-green-600 hover:text-green-800">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  className="border-green-200 text-green-600 hover:bg-green-50"
+                                  onClick={() => handleUnblockUser(user.id)}
+                                >
                                   Unblock
                                 </Button>
                               )}
@@ -800,7 +1227,7 @@ const AdminDashboard: React.FC = () => {
                         </tr>
                       ))}
                       
-                      {filteredUsers.length === 0 && (
+                      {filteredUsers.filter(u => !u.isAdmin).length === 0 && (
                         <tr>
                           <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
                             No users found matching your search criteria.
@@ -812,76 +1239,6 @@ const AdminDashboard: React.FC = () => {
                 </div>
               </div>
             </div>
-            
-            {/* Warn User Dialog */}
-            <Dialog open={warnDialogOpen} onOpenChange={setWarnDialogOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Send Warning to User</DialogTitle>
-                  <DialogDescription>
-                    This will send a warning notification to {selectedUser?.name}. Please provide a reason for the warning.
-                  </DialogDescription>
-                </DialogHeader>
-                
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="warning-reason">Warning Reason</Label>
-                    <Input
-                      id="warning-reason"
-                      placeholder="Enter warning reason..."
-                      value={warningReason}
-                      onChange={(e) => setWarningReason(e.target.value)}
-                    />
-                  </div>
-                </div>
-                
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setWarnDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleWarnUser} disabled={!warningReason.trim()}>
-                    Send Warning
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-            
-            {/* Block User Dialog */}
-            <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Block User</DialogTitle>
-                  <DialogDescription>
-                    This will block {selectedUser?.name} from accessing the platform. This action can be reversed later.
-                  </DialogDescription>
-                </DialogHeader>
-                
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="block-reason">Block Reason</Label>
-                    <Input
-                      id="block-reason"
-                      placeholder="Enter reason for blocking..."
-                      value={blockReason}
-                      onChange={(e) => setBlockReason(e.target.value)}
-                    />
-                  </div>
-                </div>
-                
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setBlockDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button 
-                    variant="destructive" 
-                    onClick={handleBlockUser} 
-                    disabled={!blockReason.trim()}
-                  >
-                    Block User
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
           </TabsContent>
           
           {/* Credit Requests Tab */}
@@ -894,46 +1251,37 @@ const AdminDashboard: React.FC = () => {
               {creditRequests.map((request) => (
                 <Card key={request.id}>
                   <CardContent className="p-6">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div>
-                        <h3 className="text-lg font-semibold">{request.userName}</h3>
-                        <p className="text-gray-600 text-sm">Requested on {request.requestDate}</p>
-                        <p className="text-gray-700 mt-2">
-                          <span className="font-medium">Reason:</span> {request.reason}
-                        </p>
-                        <p className="text-gray-700 mt-1">
-                          <span className="font-medium">Current Credits:</span> {request.currentCredits}
-                        </p>
-                        <p className="text-gray-700 mt-1">
-                          <span className="font-medium">User ID:</span> {request.userId}
-                        </p>
-                      </div>
-                      
-                      <div className="flex flex-col gap-2">
-                        <div className="flex gap-2">
-                          <Button 
-                            variant="outline" 
-                            onClick={() => handleRejectCredits(request.id)}
-                          >
-                            Reject
-                          </Button>
-                          <Button 
-                            onClick={() => handleApproveCredits(request.id)}
-                          >
-                            Approve
-                          </Button>
-                        </div>
-                        
-                        <Select defaultValue="1">
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Credits to grant" />
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-2 mb-2">
+                        <Label htmlFor="credits-to-grant">Credits to Grant</Label>
+                        <Select 
+                          value={creditsToGrant.toString()}
+                          onValueChange={(value) => setCreditsToGrant(parseInt(value))}
+                        >
+                          <SelectTrigger className="w-full" id="credits-to-grant">
+                            <SelectValue placeholder="Select number of credits" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="1">Grant 1 Credit</SelectItem>
-                            <SelectItem value="2">Grant 2 Credits</SelectItem>
-                            <SelectItem value="3">Grant 3 Credits</SelectItem>
+                            <SelectItem value="1">1 Credit</SelectItem>
+                            <SelectItem value="2">2 Credits</SelectItem>
+                            <SelectItem value="3">3 Credits (Full Refill)</SelectItem>
+                            <SelectItem value="5">5 Credits (Special Case)</SelectItem>
                           </SelectContent>
                         </Select>
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="outline" 
+                          onClick={() => handleRejectCredits(request.id)}
+                        >
+                          Reject
+                        </Button>
+                        <Button 
+                          onClick={() => handleApproveCredits(request.id)}
+                        >
+                          Approve ({creditsToGrant} {creditsToGrant === 1 ? 'credit' : 'credits'})
+                        </Button>
                       </div>
                     </div>
                   </CardContent>
@@ -950,6 +1298,204 @@ const AdminDashboard: React.FC = () => {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Warning Dialog */}
+      <Dialog open={warnDialogOpen} onOpenChange={setWarnDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Warning User</DialogTitle>
+            <DialogDescription>
+              Send a warning to {selectedUser?.name}. This will be recorded in their account history.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="warning-reason">Warning Reason</Label>
+              <Textarea
+                id="warning-reason"
+                placeholder="Enter the reason for this warning..."
+                value={warningReason}
+                onChange={(e) => setWarningReason(e.target.value)}
+                className="min-h-[100px]"
+              />
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWarnDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="default" 
+              onClick={handleWarnUser} 
+              disabled={!warningReason.trim()}
+            >
+              Send Warning
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Block Dialog */}
+      <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Block User</DialogTitle>
+            <DialogDescription>
+              Block {selectedUser?.name} from using the platform. This will prevent them from logging in or submitting new grievances.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="block-reason">Block Reason</Label>
+              <Textarea
+                id="block-reason"
+                placeholder="Enter the reason for blocking this user..."
+                value={blockReason}
+                onChange={(e) => setBlockReason(e.target.value)}
+                className="min-h-[100px]"
+              />
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBlockDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleBlockUser} 
+              disabled={!blockReason.trim()}
+            >
+              Block User
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Grievance Dialog */}
+      <Dialog open={viewGrievanceDialogOpen} onOpenChange={setViewGrievanceDialogOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Grievance Details</DialogTitle>
+            <DialogDescription>
+              Viewing detailed information about this grievance
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedGrievance && (
+            <div className="space-y-4 py-4">
+              <div className="flex flex-wrap gap-2 mb-2">
+                <StatusBadge status={selectedGrievance.status} />
+                <PriorityBadge priority={selectedGrievance.priority} />
+                <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
+                  ID: {selectedGrievance.id}
+                </span>
+              </div>
+              
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">{selectedGrievance.title}</h3>
+                <p className="text-gray-700 whitespace-pre-wrap">{selectedGrievance.description}</p>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                <div>
+                  <p className="text-sm text-gray-500">Submitted By</p>
+                  <p className="font-medium">{selectedGrievance.submittedByName || "Anonymous"}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Submission Date</p>
+                  <p className="font-medium">{new Date(selectedGrievance.date).toLocaleString()}</p>
+                </div>
+                {selectedGrievance.assignedTo && (
+                  <>
+                    <div>
+                      <p className="text-sm text-gray-500">Assigned To</p>
+                      <p className="font-medium">{selectedGrievance.assignedName || "Unknown"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Last Updated</p>
+                      <p className="font-medium">{selectedGrievance.lastUpdated ? new Date(selectedGrievance.lastUpdated).toLocaleString() : "N/A"}</p>
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              {selectedGrievance.comments && selectedGrievance.comments.length > 0 && (
+                <div className="pt-4 border-t">
+                  <h4 className="font-medium mb-2">Comments</h4>
+                  <div className="space-y-3">
+                    {selectedGrievance.comments.map((comment: any) => (
+                      <div key={comment.id} className="bg-gray-50 p-3 rounded-lg">
+                        <div className="flex justify-between items-start">
+                          <span className="font-medium">{comment.userName || "Unknown"}</span>
+                          <span className="text-xs text-gray-500">{new Date(comment.date).toLocaleString()}</span>
+                        </div>
+                        <p className="text-gray-700 text-sm mt-1">{comment.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              <div className="pt-4 border-t">
+                <h4 className="font-medium mb-2">Action</h4>
+                
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-comment">Add Comment</Label>
+                    <Textarea
+                      id="admin-comment"
+                      placeholder="Add a comment for this grievance..."
+                      value={adminComment}
+                      onChange={(e) => setAdminComment(e.target.value)}
+                      className="min-h-[80px]"
+                    />
+                  </div>
+                  
+                  <div className="flex gap-2 justify-end">
+                    {selectedGrievance.status === "pending" && (
+                      <Button 
+                        onClick={() => {
+                          handleUpdateGrievanceStatus(selectedGrievance.id, "in-progress");
+                          setViewGrievanceDialogOpen(false);
+                        }}
+                      >
+                        Start Processing
+                      </Button>
+                    )}
+                    
+                    {selectedGrievance.status === "in-progress" && (
+                      <Button 
+                        onClick={() => {
+                          handleUpdateGrievanceStatus(selectedGrievance.id, "resolved");
+                          setViewGrievanceDialogOpen(false);
+                        }}
+                      >
+                        Mark as Resolved
+                      </Button>
+                    )}
+                    
+                    {adminComment.trim() && (
+                      <Button 
+                        variant="outline"
+                        onClick={() => {
+                          handleAddCommentOnly(selectedGrievance.id);
+                          setViewGrievanceDialogOpen(false);
+                        }}
+                      >
+                        Add Comment Only
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
