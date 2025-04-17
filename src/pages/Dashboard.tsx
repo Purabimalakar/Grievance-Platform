@@ -32,9 +32,6 @@ const Dashboard: React.FC = () => {
   const [grievances, setGrievances] = useState<Grievance[]>([]);
   const [isLoadingGrievances, setIsLoadingGrievances] = useState(true);
   const [hasActiveRequest, setHasActiveRequest] = useState(false);
-  const [userWarnings, setUserWarnings] = useState<any[]>([]);
-  const [showWarningDetails, setShowWarningDetails] = useState(false);
-  const [selectedWarning, setSelectedWarning] = useState<any>(null);
   
   // Check for existing credit requests and fetch grievances
   useEffect(() => {
@@ -58,33 +55,6 @@ const Dashboard: React.FC = () => {
             req.userId === user.id && req.status === "pending"
           );
           setHasActiveRequest(hasRequest);
-        }
-        
-        // Fetch user warnings
-        const userRef = ref(rtdb, `users/${user.id}`);
-        const userSnapshot = await get(userRef);
-        
-        if (userSnapshot.exists()) {
-          const userData = userSnapshot.val();
-          if (userData.warnings && userData.warnings > 0) {
-            // Check for warning notifications
-            const notificationsRef = ref(rtdb, `notifications/${user.id}`);
-            const notificationsSnapshot = await get(notificationsRef);
-            
-            if (notificationsSnapshot.exists()) {
-              const notificationsData = notificationsSnapshot.val();
-              const warningNotifications = Object.keys(notificationsData)
-                .filter(key => notificationsData[key].type === "warning")
-                .map(key => ({
-                  id: key,
-                  ...notificationsData[key],
-                  date: new Date(notificationsData[key].date)
-                }))
-                .sort((a, b) => b.date.getTime() - a.date.getTime());
-              
-              setUserWarnings(warningNotifications);
-            }
-          }
         }
         
         // Then fetch grievances

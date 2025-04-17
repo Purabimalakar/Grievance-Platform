@@ -1209,6 +1209,17 @@ const AdminDashboard: React.FC = () => {
                                   >
                                     Warn
                                   </Button>
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    className="border-red-200 text-red-600 hover:bg-red-50"
+                                    onClick={() => {
+                                      setSelectedUser(user);
+                                      setBlockDialogOpen(true);
+                                    }}
+                                  >
+                                    Block
+                                  </Button>
                                 </>
                               )}
                               
