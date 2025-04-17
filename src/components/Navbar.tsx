@@ -87,7 +87,7 @@ const Navbar: React.FC = () => {
     }`}>
       <div className="container mx-auto px-4 py-3 md:py-4 flex items-center justify-between">
         <Link to={getHomeLink()} className="flex items-center space-x-2" onClick={closeMenu}>
-          <span className="text-lg md:text-xl font-semibold text-primary">GrievancePortal</span>
+          <span className="text-lg md:text-xl font-semibold text-primary">Raise Voice</span>
         </Link>
 
         {/* Desktop Navigation */}
