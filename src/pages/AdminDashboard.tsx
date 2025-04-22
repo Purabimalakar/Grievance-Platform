@@ -190,6 +190,21 @@ const AdminDashboard: React.FC = () => {
         read: false
       });
       
+      // Add a status update to the timeline
+      let timeline = grievanceData.timeline || [];
+      
+      // Make sure timeline is an array (Firebase can convert arrays to objects)
+      if (!Array.isArray(timeline)) {
+        timeline = Object.values(timeline);
+      }
+      
+      // Add the status update to the timeline
+      timeline.push({
+        date: new Date().toLocaleString(),
+        status: "status_update",
+        description: `Status changed to "${newStatus}" by admin.`
+      });
+      
       // Add admin comment if provided
       if (adminComment.trim()) {
         const comments = grievanceData.comments || [];
@@ -201,8 +216,16 @@ const AdminDashboard: React.FC = () => {
           userName: user?.name || 'Admin'
         });
         
+        // Also add the comment to the timeline
+        timeline.push({
+          date: new Date().toLocaleString(),
+          status: "comment",
+          description: `${user?.name || 'Admin'}: ${adminComment}`
+        });
+        
         await update(grievanceRef, { 
           status: newStatus,
+          timeline: timeline,
           lastUpdated: new Date().toISOString(),
           comments
         });
@@ -211,6 +234,7 @@ const AdminDashboard: React.FC = () => {
       } else {
         await update(grievanceRef, { 
           status: newStatus,
+          timeline: timeline,
           lastUpdated: new Date().toISOString()
         });
       }
@@ -495,7 +519,7 @@ const AdminDashboard: React.FC = () => {
         const comments = grievanceData.comments || [];
         const userId = grievanceData.userId;
         
-        // Add the new comment
+        // Add the new comment to the comments array
         comments.push({
           id: Date.now().toString(),
           text: adminComment,
@@ -504,9 +528,28 @@ const AdminDashboard: React.FC = () => {
           userName: user?.name || 'Admin'
         });
         
-        // Update the grievance with the new comment
+        // Get the timeline or create a new one
+        let timeline = grievanceData.timeline || [];
+        
+        // Make sure timeline is an array (Firebase can convert arrays to objects)
+        if (!Array.isArray(timeline)) {
+          timeline = Object.values(timeline);
+        }
+        
+        // Format the admin's name and comment to match user comments
+        const adminName = user?.name || 'Admin';
+        
+        // Add to timeline to ensure visibility for both user and admin
+        timeline.push({
+          date: new Date().toLocaleString(),
+          status: "comment",
+          description: `${adminName}: ${adminComment}`
+        });
+        
+        // Update the grievance with the new comment and timeline
         await update(grievanceRef, { 
           comments,
+          timeline,
           lastUpdated: new Date().toISOString()
         });
         
@@ -1398,14 +1441,6 @@ const AdminDashboard: React.FC = () => {
           
           {selectedGrievance && (
             <div className="space-y-4 py-4">
-              <div className="flex flex-wrap gap-2 mb-2">
-                <StatusBadge status={selectedGrievance.status} />
-                <PriorityBadge priority={selectedGrievance.priority} />
-                <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
-                  ID: {selectedGrievance.id}
-                </span>
-              </div>
-              
               <div className="space-y-2">
                 <h3 className="text-lg font-semibold">{selectedGrievance.title}</h3>
                 <p className="text-gray-700 whitespace-pre-wrap">{selectedGrievance.description}</p>
@@ -1434,22 +1469,31 @@ const AdminDashboard: React.FC = () => {
                 )}
               </div>
               
-              {selectedGrievance.comments && selectedGrievance.comments.length > 0 && (
-                <div className="pt-4 border-t">
-                  <h4 className="font-medium mb-2">Comments</h4>
-                  <div className="space-y-3">
-                    {selectedGrievance.comments.map((comment: any) => (
-                      <div key={comment.id} className="bg-gray-50 p-3 rounded-lg">
-                        <div className="flex justify-between items-start">
-                          <span className="font-medium">{comment.userName || "Unknown"}</span>
-                          <span className="text-xs text-gray-500">{new Date(comment.date).toLocaleString()}</span>
-                        </div>
-                        <p className="text-gray-700 text-sm mt-1">{comment.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Timeline Section - scrollable with fixed height */}
+              <Card className="mt-4">
+                <CardHeader>
+                  <CardTitle className="text-lg">Timeline & Comments</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {selectedGrievance.timeline && selectedGrievance.timeline.length > 0 ? (
+                    <div className="max-h-60 overflow-y-auto pr-2">
+                      <ol className="relative border-l border-gray-200 ml-3">
+                        {selectedGrievance.timeline.map((event: any, index: number) => (
+                          <li key={index} className="mb-6 ml-6">
+                            <span className="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-8 ring-white">
+                              <div className="h-3 w-3 rounded-full bg-blue-500"></div>
+                            </span>
+                            <h3 className="font-medium text-gray-900">{event.date}</h3>
+                            <p className={`text-gray-700 mt-1 ${event.status === "comment" ? "p-3 bg-gray-50 rounded-lg" : ""}`}>{event.description}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-center py-4">No timeline events available.</p>
+                  )}
+                </CardContent>
+              </Card>
               
               <div className="pt-4 border-t">
                 <h4 className="font-medium mb-2">Action</h4>
