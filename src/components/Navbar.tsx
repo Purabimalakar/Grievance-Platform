@@ -59,13 +59,35 @@ const Navbar: React.FC = () => {
     return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase();
   };
 
+  // Get the dashboard URL based on user role
+  const getDashboardUrl = () => {
+    return user?.isAdmin ? "/admin" : "/dashboard";
+  };
+
+  // Get logo link destination based on user role
+  const getHomeLink = () => {
+    return user?.isAdmin ? "/admin" : "/";
+  };
+
+  // Handle dashboard click - ensure admins go to admin dashboard
+  const handleDashboardClick = () => {
+    closeMenu();
+    // For regular users, use the normal /dashboard route
+    // For admins, redirect to /admin
+    if (user?.isAdmin) {
+      navigate("/admin");
+    } else {
+      navigate("/dashboard");
+    };
+  };
+
   return (
     <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
       isScrolled ? "bg-white/90 shadow-sm backdrop-blur-md" : "bg-white/80 backdrop-blur-sm"
     }`}>
       <div className="container mx-auto px-4 py-3 md:py-4 flex items-center justify-between">
-        <Link to="/" className="flex items-center space-x-2" onClick={closeMenu}>
-          <span className="text-lg md:text-xl font-semibold text-primary">GrievancePortal</span>
+        <Link to={getHomeLink()} className="flex items-center space-x-2" onClick={closeMenu}>
+          <span className="text-lg md:text-xl font-semibold text-primary">Raise Voice</span>
         </Link>
 
         {/* Desktop Navigation */}
@@ -106,7 +128,7 @@ const Navbar: React.FC = () => {
           </Link>
           
           {/* Authenticated-only links */}
-          {isAuthenticated && (
+          {isAuthenticated && !user?.isAdmin && (
             <>
               <Link
                 to="/submit-grievance"
@@ -124,15 +146,19 @@ const Navbar: React.FC = () => {
               >
                 Track Grievance
               </Link>
-              <Link
-                to="/dashboard"
-                className={`text-sm font-medium hover:text-primary transition-colors ${
-                  isActive("/dashboard") ? "text-primary" : "text-gray-600"
-                }`}
-              >
-                Dashboard
-              </Link>
             </>
+          )}
+          
+          {/* Dashboard link - different for admin and normal user */}
+          {isAuthenticated && (
+            <button
+              onClick={handleDashboardClick}
+              className={`text-sm font-medium hover:text-primary transition-colors ${
+                (isActive("/dashboard") || isActive("/admin")) ? "text-primary" : "text-gray-600"
+              }`}
+            >
+              Dashboard
+            </button>
           )}
         </nav>
 
@@ -191,9 +217,9 @@ const Navbar: React.FC = () => {
           <div className="container mx-auto px-4 py-2">
             <nav className="flex flex-col space-y-3">
               <Link
-                to="/"
+                to={getHomeLink()}
                 className={`text-sm font-medium py-2 hover:text-primary transition-colors ${
-                  isActive("/") ? "text-primary" : "text-gray-600"
+                  isActive("/") || (user?.isAdmin && isActive("/admin")) ? "text-primary" : "text-gray-600"
                 }`}
                 onClick={closeMenu}
               >
@@ -232,33 +258,39 @@ const Navbar: React.FC = () => {
               {/* Authenticated-only links */}
               {isAuthenticated ? (
                 <>
-                  <Link
-                    to="/submit-grievance"
-                    className={`text-sm font-medium py-2 hover:text-primary transition-colors ${
-                      isActive("/submit-grievance") ? "text-primary" : "text-gray-600"
+                  {!user?.isAdmin && (
+                    <>
+                      <Link
+                        to="/submit-grievance"
+                        className={`text-sm font-medium py-2 hover:text-primary transition-colors ${
+                          isActive("/submit-grievance") ? "text-primary" : "text-gray-600"
+                        }`}
+                        onClick={closeMenu}
+                      >
+                        Submit Grievance
+                      </Link>
+                      <Link
+                        to="/track-grievance"
+                        className={`text-sm font-medium py-2 hover:text-primary transition-colors ${
+                          isActive("/track-grievance") ? "text-primary" : "text-gray-600"
+                        }`}
+                        onClick={closeMenu}
+                      >
+                        Track Grievance
+                      </Link>
+                    </>
+                  )}
+                  
+                  {/* Dashboard link - different for admin and normal user */}
+                  <button
+                    onClick={handleDashboardClick}
+                    className={`text-sm font-medium py-2 hover:text-primary transition-colors text-left ${
+                      (isActive("/dashboard") || isActive("/admin")) ? "text-primary" : "text-gray-600"
                     }`}
-                    onClick={closeMenu}
-                  >
-                    Submit Grievance
-                  </Link>
-                  <Link
-                    to="/track-grievance"
-                    className={`text-sm font-medium py-2 hover:text-primary transition-colors ${
-                      isActive("/track-grievance") ? "text-primary" : "text-gray-600"
-                    }`}
-                    onClick={closeMenu}
-                  >
-                    Track Grievance
-                  </Link>
-                  <Link
-                    to="/dashboard"
-                    className={`text-sm font-medium py-2 hover:text-primary transition-colors ${
-                      isActive("/dashboard") ? "text-primary" : "text-gray-600"
-                    }`}
-                    onClick={closeMenu}
                   >
                     Dashboard
-                  </Link>
+                  </button>
+                  
                   <div className="pt-2 border-t border-gray-100">
                     <div className="flex items-center space-x-3 mb-3">
                       <Avatar className="h-8 w-8">

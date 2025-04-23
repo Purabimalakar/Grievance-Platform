@@ -9,7 +9,7 @@ import { AlertCircle, Upload, Loader2, PlusCircle, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import { detectPriority, getDetectedKeywords } from "@/utils/keywordDetection";
-import { ref, push, serverTimestamp } from "firebase/database";
+import { ref, push, serverTimestamp, get } from "firebase/database";
 import { rtdb } from "@/config/firebase";
 
 const SubmitGrievance: React.FC = () => {
@@ -22,10 +22,36 @@ const SubmitGrievance: React.FC = () => {
   const [priority, setPriority] = useState<"normal" | "high" | "urgent">("normal");
   const [creditsRequested, setCreditsRequested] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [hasActiveRequest, setHasActiveRequest] = useState(false);
   
   const { user, isAuthenticated, isLoading, updateUserCredits } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  
+  // Check if user has any pending credit requests
+  useEffect(() => {
+    const checkExistingRequests = async () => {
+      if (!user || !user.id) return;
+      
+      try {
+        const creditRequestsRef = ref(rtdb, 'creditRequests');
+        const snapshot = await get(creditRequestsRef);
+        
+        if (snapshot.exists()) {
+          const requests = Object.values(snapshot.val());
+          const hasRequest = requests.some((req: any) => 
+            req.userId === user.id && req.status === "pending"
+          );
+          setHasActiveRequest(hasRequest);
+          setCreditsRequested(hasRequest);
+        }
+      } catch (error) {
+        console.error("Error checking credit requests:", error);
+      }
+    };
+    
+    checkExistingRequests();
+  }, [user]);
   
   useEffect(() => {
     // Analyze the text whenever title or description changes
@@ -191,15 +217,29 @@ const SubmitGrievance: React.FC = () => {
   const requestMoreCredits = async () => {
     if (!user || creditsRequested) return;
     
+    // Prompt the user for a reason
+    const reason = prompt("Please provide a specific reason why you need more credits. This is required for admin approval.");
+    
+    // Validate that a reason was provided
+    if (!reason || reason.trim().length < 10) {
+      toast({
+        title: "Reason Required",
+        description: "Please provide a detailed reason (at least 10 characters) for requesting additional credits.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     try {
-      // Push a credit request to Firebase
+      // Push a credit request to Firebase with the reason
       const creditRequestsRef = ref(rtdb, 'creditRequests');
       await push(creditRequestsRef, {
         userId: user.id,
         userName: user.name,
         currentCredits: user.grievanceCredits,
         requestDate: new Date().toISOString(),
-        status: "pending"
+        status: "pending",
+        reason: reason.trim()
       });
       
       setCreditsRequested(true);

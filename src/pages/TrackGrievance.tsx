@@ -29,6 +29,13 @@ interface Grievance {
   assignedTo?: string;
   expectedResolution?: string;
   attachments?: string[] | null;
+  comments?: {
+    id: string;
+    text: string;
+    date: string;
+    userId: string;
+    userName: string;
+  }[];
 }
 
 const TrackGrievance: React.FC = () => {
@@ -104,7 +111,8 @@ const TrackGrievance: React.FC = () => {
                   status: "submitted",
                   description: "Grievance submitted successfully."
                 }
-              ]
+              ],
+              comments: data.comments || []
             };
           }
         });
@@ -182,10 +190,29 @@ const TrackGrievance: React.FC = () => {
         description: `${user.name || "User"}: ${comment}`
       });
       
-      // Update the grievance in Firebase
-      const grievanceRef = ref(rtdb, `grievances/${grievance.id}`);
+      // Get the current comments array or create a new one
+      let grievanceRef = ref(rtdb, `grievances/${grievance.id}`);
+      const grievanceSnapshot = await get(grievanceRef);
+      let comments = [];
+      
+      if (grievanceSnapshot.exists()) {
+        const grievanceData = grievanceSnapshot.val();
+        comments = grievanceData.comments || [];
+      }
+      
+      // Add the new comment to the comments array
+      comments.push({
+        id: Date.now().toString(),
+        text: comment,
+        date: new Date().toISOString(),
+        userId: user.id,
+        userName: user.name || "User"
+      });
+      
+      // Update the grievance in Firebase with both timeline and comments
       await update(grievanceRef, {
         timeline: newTimeline,
+        comments: comments,
         lastUpdated: serverTimestamp()
       });
       
@@ -200,7 +227,8 @@ const TrackGrievance: React.FC = () => {
       // Update local state
       setGrievance({
         ...grievance,
-        timeline: newTimeline
+        timeline: newTimeline,
+        comments: comments
       });
     } catch (error) {
       console.error("Error adding comment:", error);
@@ -487,33 +515,37 @@ const TrackGrievance: React.FC = () => {
               
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">Timeline</CardTitle>
+                  <CardTitle className="text-lg">Timeline & Comments</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {grievance.timeline && grievance.timeline.length > 0 ? (
-                    <ol className="relative border-l border-gray-200 ml-3">
-                      {grievance.timeline.map((event, index) => (
-                        <li key={index} className="mb-6 ml-6">
-                          <span className="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-8 ring-white">
-                            <div className="h-3 w-3 rounded-full bg-blue-500"></div>
-                          </span>
-                          <h3 className="font-medium text-gray-900">{event.date}</h3>
-                          <p className="text-gray-700 mt-1">{event.description}</p>
-                        </li>
-                      ))}
-                    </ol>
+                    <div className="max-h-60 overflow-y-auto pr-2">
+                      <ol className="relative border-l border-gray-200 ml-3">
+                        {grievance.timeline.map((event, index) => (
+                          <li key={index} className="mb-6 ml-6">
+                            <span className="absolute flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full -left-3 ring-8 ring-white">
+                              <div className="h-3 w-3 rounded-full bg-blue-500"></div>
+                            </span>
+                            <h3 className="font-medium text-gray-900">{event.date}</h3>
+                            <p className={`text-gray-700 mt-1 ${event.status === "comment" ? "p-3 bg-gray-50 rounded-lg" : ""}`}>{event.description}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
                   ) : (
                     <p className="text-gray-500 text-center py-4">No timeline events available.</p>
                   )}
                 </CardContent>
               </Card>
               
-              {isAuthenticated && (
+              {(isAuthenticated && (user?.id === grievance.userId || user?.isAdmin)) && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg">Add a Comment</CardTitle>
                     <CardDescription>
-                      Provide additional information or ask about the status of your grievance.
+                      {user?.isAdmin 
+                        ? "Add an official response or request more information." 
+                        : "Provide additional information or ask about the status of your grievance."}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

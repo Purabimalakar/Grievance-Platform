@@ -1,13 +1,76 @@
-
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Hero from "@/components/Hero";
 import GrievanceCard from "@/components/GrievanceCard";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "react-router-dom";
+import { rtdb } from "@/config/firebase";
+import { ref, get } from "firebase/database";
+import { Grievance } from "@/types/grievance";
+import { Loader2, Bell } from "lucide-react";
 
 const Index: React.FC = () => {
-  // Sample recent testimonials
-  const recentTestimonials = [
+  const [resolvedGrievances, setResolvedGrievances] = useState<Grievance[]>([]);
+  const [notices, setNotices] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch resolved grievances and notices from Firebase
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Fetch resolved grievances
+        const grievancesRef = ref(rtdb, 'grievances');
+        const grievancesSnapshot = await get(grievancesRef);
+        
+        if (grievancesSnapshot.exists()) {
+          const grievancesData = grievancesSnapshot.val();
+          const grievancesArray = Object.keys(grievancesData)
+            .map(key => ({
+              id: key,
+              ...grievancesData[key]
+            }))
+            .filter(g => g.status === "resolved" && !g.removeFromHomepage); // Only include resolved that aren't flagged to be removed
+          
+          // Sort by date and get the latest 3
+          const resolved = grievancesArray
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, 3);
+          
+          setResolvedGrievances(resolved);
+        }
+
+        // Fetch official notices/statements
+        const statementsRef = ref(rtdb, 'statements');
+        const statementsSnapshot = await get(statementsRef);
+        
+        if (statementsSnapshot.exists()) {
+          const statementsData = statementsSnapshot.val();
+          const statementsArray = Object.keys(statementsData)
+            .map(key => ({
+              id: key,
+              ...statementsData[key]
+            }))
+            .filter(s => s.showOnHomepage !== false); // Only include statements that should be shown on homepage
+          
+          // Sort by date and get the latest 2
+          const recentStatements = statementsArray
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, 2);
+          
+          setNotices(recentStatements);
+        }
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchData();
+  }, []);
+
+  // Sample fallback testimonials (only used if no real resolved grievances exist)
+  const fallbackTestimonials = [
     {
       id: "GR12345",
       title: "Street Light Repair in Sector 7",
@@ -33,6 +96,9 @@ const Index: React.FC = () => {
       priority: "normal" as const,
     },
   ];
+
+  // Use real resolved grievances if available, otherwise use fallbacks
+  const testimonialsToShow = resolvedGrievances.length > 0 ? resolvedGrievances : fallbackTestimonials;
 
   return (
     <div className="animate-fade-in">
@@ -97,6 +163,47 @@ const Index: React.FC = () => {
         </div>
       </section>
       
+      {/* Official Notices Section - New */}
+      {notices.length > 0 && (
+        <section className="py-8 bg-blue-50">
+          <div className="container mx-auto px-4">
+            <div className="max-w-4xl mx-auto">
+              <div className="flex items-center justify-center mb-6">
+                <Bell className="h-5 w-5 text-primary mr-2" />
+                <h2 className="text-xl font-bold text-gray-900">Official Notices</h2>
+              </div>
+              
+              <div className="space-y-4">
+                {notices.map((notice) => (
+                  <Card key={notice.id} className="border-l-4 border-l-primary">
+                    <CardContent className="p-5">
+                      <div className="flex justify-between items-start mb-2">
+                        <h3 className="text-lg font-semibold text-gray-900">{notice.title}</h3>
+                        <span className="text-sm text-gray-500">{notice.date}</span>
+                      </div>
+                      <p className="text-gray-700 text-sm mb-2">{notice.content.length > 150 
+                        ? `${notice.content.substring(0, 150)}...` 
+                        : notice.content}
+                      </p>
+                      <div className="text-sm">
+                        <span className="font-medium text-gray-900">Issued by:</span>{" "}
+                        <span className="text-gray-700">{notice.department}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                
+                <div className="text-center mt-4">
+                  <Link to="/testimonials">
+                    <Button variant="outline" size="sm">View All Notices</Button>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+      
       {/* Recent Success Stories */}
       <section className="py-16 bg-white">
         <div className="container mx-auto px-4">
@@ -107,15 +214,22 @@ const Index: React.FC = () => {
             </p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-            {recentTestimonials.map((testimonial) => (
-              <GrievanceCard
-                key={testimonial.id}
-                {...testimonial}
-                showDetails={false}
-              />
-            ))}
-          </div>
+          {isLoading ? (
+            <div className="flex justify-center items-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="ml-2 text-gray-600">Loading success stories...</span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+              {testimonialsToShow.map((testimonial) => (
+                <GrievanceCard
+                  key={testimonial.id}
+                  {...testimonial}
+                  showDetails={false}
+                />
+              ))}
+            </div>
+          )}
           
           <div className="mt-12 text-center">
             <Link to="/testimonials">

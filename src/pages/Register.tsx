@@ -49,7 +49,8 @@ const Register: React.FC = () => {
     setIsLoading(true);
     
     try {
-      const success = await register(name, email, mobile, password);
+      // Fixed the parameter order - passing password before mobile
+      const success = await register(name, email, password, mobile);
       
       if (success) {
         toast({
